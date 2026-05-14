@@ -138,26 +138,90 @@ When the card flow finishes, `ProcessSaleTransaction.initialize` runs in the sal
 
 ---
 
-## Part 5 — Which **ISO 8583 fields** go into the wire message (and how Host A/B matters)
+## Part 5 — **ISO 8583 data elements** used on sale (and how they are built)
 
-`SaleISOFieldsBuilder.getSaleIsoFields` turns the `BaseTransactionModel` into an ordered list of `ISOFieldModel` entries. **Common bits** include MTI, PAN, processing code, amount (12-digit), STAN, local time/date, expiry, country code, POS entry mode, optional PAN sequence, NII/function code, **POS condition** (differs for normal vs MOTO sale via `SaleType`), terminal ID, merchant ID, merchant name, private field 48, currency, optional PIN (52), optional security-related field 53, optional ICC (55), field 60, invoice (62), reserved private (120), and optional tip / batch extension fields (121–122) when tip is non-zero.
+Sale requests are assembled in **two steps**: (1) build a `List<ISOFieldModel>` from the in-memory sale row (`SaleISOFieldsBuilder.getSaleIsoFields`), then (2) encode that list into bytes (`ISO8583PacketBuilder.buildPacket`). Each `ISOFieldModel` holds **ISO bit number** (`field`), **payload** (`value` as digits, text, or hex depending on field), **length** passed to the encoder, and optional **`useCustomConversion`** for binary bodies (PIN block, ICC) that are carried as **hex** in the model but measured in **raw byte length** for VAR fields.
 
-**Host-specific shaping** — Many positions call `saleFieldsInterface` (implemented in the **Host A / Host B** source sets): examples include local date/time presentation, country code, NII, track 2, merchant name, field 48/49/53/60/120, tip and batch-related fields. That is how the **same** `BaseTransactionModel` produces **different** on-wire layouts without forking the whole sale orchestrator.
+### 5.1 — Field inventory (sale request)
+
+The builder follows a **fixed append order**. Rows marked **conditional** are omitted when empty or when the rule fails (the packet builder also skips entries with empty value or non-positive length).
+
+| ISO bit | Typical purpose | Main source on model | Conditional / notes |
+|--------:|-----------------|----------------------|------------------------|
+| 0 | MTI (financial request) | `de_0_mti` | Always |
+| 2 | PAN | `de_2_pan` | Always |
+| 3 | Processing code | `de_3_proc_code` | Always |
+| 4 | Transaction amount | `de_4_amount` padded to 12 digits | Always |
+| 11 | STAN | `de_11_stan` padded to 6 | Always |
+| 12 | Local time | `de_12_local_time` | Host adapter may wrap (`getField12LocalTimeFromFlavors`) |
+| 13 | Local date | `de_13_local_date` padded | Host adapter may wrap (`getField13LocalDateFromFlavors`) |
+| 14 | Expiry | `de_14_expiry_date` | Always |
+| 19 | Country code | `de_19_country_code` | Host adapter may wrap |
+| 22 | POS entry mode | `de_22_pos_entry_mode` | Always; entry-mode constants often come from `saleFieldsInterface` |
+| 23 | PAN sequence number | `de_23_pan_seq_no` | **Only if** non-empty |
+| 24 | NII / function code | `de_24_nii_func_code` | Host adapter may wrap |
+| 25 | POS condition code | From `SaleType` (normal vs MOTO) via `getConditionCode` | Always |
+| 35 | Track 2 | `de_35_track2` | **Only if** non-empty |
+| 41 | Terminal ID | `de_41_tid` padded to 8 | Always |
+| 42 | Merchant ID | `de_42_mid` padded to 15 | Always |
+| 43 | Merchant name | `de_43_merchant_name` | Host adapter may wrap |
+| 48 | Additional private data | `de_48_private_data` | Host adapter may wrap |
+| 49 | Currency code | `de_49_currency` | Host adapter may wrap |
+| 52 | PIN block | `de_52_pin_data` | **Only if** present; hex value, **byte** length, custom conversion |
+| 53 | Security-related control data | `de_53_secured_ctrl_data` | **Only if** non-empty; host adapter may wrap |
+| 55 | ICC (EMV) data | `de_55_icc_data` | **Only if** present; hex value, **byte** length, custom conversion |
+| 60 | Reserved / batch usage | `de_60_reserved` | Host adapter may wrap |
+| 62 | Invoice / POS reference | `de_62_invoice_no` | Always in builder list |
+| 120 | Network private | `de_120_reserved_private_data` | Host adapter may wrap |
+| 121 | Tip amount | From `if_tip` | **Only if** tip parses to a positive amount |
+| 122 | Batch number | From `de_batch_no` | **Only if** tip branch entered (same guard as DE121 in current code) |
+
+Bit index constants (`FIELD_MTI`, `FIELD_PAN`, …) live in `.../domain/transactions/sale/constants/SaleConstants.kt`. **Semantic defaults** for MTI, processing code, currency, reserved tokens, and MOTO POS condition come from sale constants and `SaleModelCreation`; low-level formatting differences stay in **Host A / B** `saleFieldsInterface` implementations.
+
+### 5.2 — How values are **formed** before ISO encoding
+
+- **DE4 amount** — Business amount is converted to ISO amount form and **left-padded with zeros** to 12 characters.
+- **DE11 STAN** — Left-padded to 6 digits from the counter allocated in `ProcessSaleTransaction.initialize`.
+- **DE12 / DE13** — Taken from the terminal timestamp at model creation; host flavors may reformat width or encoding.
+- **DE22** — Reflects chip, contactless, mag-stripe, or keyed (MOTO) capture path from `TransactionHandler` / card stack.
+- **DE25** — `saleFieldsInterface.getConditionCode` distinguishes normal sale vs MOTO sale using `TransactionManager.transactionType`.
+- **DE35** — Included only when track-2 data exists.
+- **DE52 / DE55** — Binary fields: bytes → **hex** in `ISOFieldModel.value`, with `length` = **byte count** and `useCustomConversion = true` so `ISO8583PacketBuilder` uses `ConversionUtils.stringToByteArray` correctly for TLV/BCD packing.
+- **DE121 / DE122** — Appended only when tip is non-zero; values are padded numeric strings per builder.
+
+### 5.3 — How the **list** becomes **on-wire bytes** (ties to Part 6)
+
+For each retained `ISOFieldModel`, `ISO8583Message.setBit(field, data, len)` uses **`ISO8583DomainConfig`** for that bit: max length, **fixed vs variable** length (`ISO8583LengthType`), and encoding type (`ISO8583EncodingType`, e.g. BCD vs ASCII). Bit **0** carries the MTI; bits **2+** set the bitmap and write field bodies into an internal buffer. Fields that were never added do not appear in the bitmap.
+
+Then **`ISO8583PacketBuilder.getPacketHeader`** prepends **BCD length** and **TPDU** (`TPDU.get()`), producing the final `ByteArray` stored on the transaction row and sent on the socket.
+
+### 5.4 — Why **Host A / Host B** matter at the field-list stage
+
+**`saleFieldsInterface`** supplies host-specific `ISOFieldModel` wrappers for many DEs (time, date, country, NII, track 2, merchant name, 48, 49, 53, 60, 120, tip/batch helpers). The same orchestration code therefore emits **different** field packaging per host without duplicating `SaleISOFieldsBuilder` control flow.
 
 **Code anchors**
 
 - Field list and conditionals: `.../domain/transactions/sale/utils/SaleISOFieldsBuilder.kt`
-- Host-facing interface: `.../flavors/interfaces/` (implementations live under host-specific source roots bundled by Gradle)
+- Bit indices and defaults: `.../domain/transactions/sale/constants/SaleConstants.kt`
+- Model population: `.../domain/transactions/sale/utils/SaleModelCreation.kt`
+- Host interface: `.../flavors/interfaces/` (host-specific implementations)
+- Bitmap / encoding: `.../services/iso8583/packetBuilder/ISO8583Message.kt`, `.../services/iso8583/domain/ISO8583DomainConfig.kt`
 
 ```mermaid
-flowchart LR
+flowchart TB
   M[BaseTransactionModel]
-  B[SaleISOFieldsBuilder]
+  B[SaleISOFieldsBuilder getSaleIsoFields]
   I[saleFieldsInterface Host A or B]
-  L[List of ISOFieldModel]
+  F[List of ISOFieldModel]
+  P[ISO8583PacketBuilder buildPacket]
+  Msg[ISO8583Message setBit per DE]
+  Out[ByteArray TPDU length plus ISO body]
   M --> B
   B --> I
-  I --> L
+  I --> F
+  F --> P
+  P --> Msg
+  Msg --> Out
 ```
 
 ---
