@@ -39,7 +39,7 @@ Each build variant selects the appropriate **host field behavior** and **device 
 | Architecture index | [architecture/README.md](architecture/README.md) |
 | Card search and device flavors | [architecture/search-card/CARD_SEARCH_BY_DEVICE.md](architecture/search-card/CARD_SEARCH_BY_DEVICE.md) |
 | Sale flow | [architecture/sale/SALE_FLOW.md](architecture/sale/SALE_FLOW.md) |
-| ISO 8583 sale message (conceptual) | [architecture/iso8583/SALE_MESSAGE.md](architecture/iso8583/SALE_MESSAGE.md) |
+| ISO 8583 packet building (full) | [architecture/iso8583/PACKET_BUILDING.md](architecture/iso8583/PACKET_BUILDING.md) |
 | Data and storage | [architecture/database/DATA_AND_STORAGE.md](architecture/database/DATA_AND_STORAGE.md) |
 | Embedded SDK and host callbacks | [architecture/sdk/EMBEDDED_SDK_AND_HOST_CALLBACKS.md](architecture/sdk/EMBEDDED_SDK_AND_HOST_CALLBACKS.md) |
 
