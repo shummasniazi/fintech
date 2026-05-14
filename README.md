@@ -1,8 +1,10 @@
 # Loop NextGen POS — Android Payment Terminal Application
 
-**Portfolio / work showcase.** This document describes a production-style **Kotlin Android POS** application for payment terminals. The same content is published as **`README.md`** in [shummasniazi/fintech](https://github.com/shummasniazi/fintech) (GitHub) **without publishing application source code**. File paths below refer to the **private source tree** where the project lives; they are not present in that public repo.
+**Portfolio / work showcase.** This document describes **Loop NextGen POS** — a production-style Kotlin Android payment terminal application. **Application source is not in this repository**; file paths are reference-only and point at the private codebase layout.
 
 **Author:** [shummasniazi](https://github.com/shummasniazi)
+
+A copy of this document is also kept as `readme.md` in the private development repository for editing; [fintech](https://github.com/shummasniazi/fintech) uses it as the default GitHub **README**.
 
 ---
 
@@ -234,8 +236,8 @@ All paths below are under `docs/` in the **source** repository:
 
 ---
 
-## GitHub copy
+## GitHub
 
-The [fintech](https://github.com/shummasniazi/fintech) repository on GitHub uses this document as **`README.md`** (sync by copying from this file when you update the portfolio text).
+This file is the default **`README.md`** on [github.com/shummasniazi/fintech](https://github.com/shummasniazi/fintech). Update the portfolio text there by editing this document in the private repo and pushing to `main`, or edit on GitHub directly.
 
 This README intentionally **does not** embed proprietary host URLs, keys, or merchant data.
