@@ -1,243 +1,291 @@
 # Loop NextGen POS — Android Payment Terminal Application
 
-**Portfolio / work showcase.** This document describes **Loop NextGen POS** — a production-style Kotlin Android payment terminal application. **Application source is not in this repository**; file paths are reference-only and point at the private codebase layout.
+**Portfolio / work showcase.** This document describes **Loop NextGen POS** — a production-style Kotlin Android payment terminal application. **Application source is not in this public repository**; paths below use `...` within `app/src/main/java/...` to avoid tying the narrative to internal product or host codenames.
 
 **Author:** [shummasniazi](https://github.com/shummasniazi)
 
-A copy of this document is also kept as `readme.md` in the private development repository for editing; [fintech](https://github.com/shummasniazi/fintech) uses it as the default GitHub **README**.
-
----
-
-## Tech stack
-
-- **Language:** Kotlin  
-- **UI:** Jetpack Compose, Material 3  
-- **DI:** Hilt (Dagger)  
-- **Persistence:** Room  
-- **HTTP:** Retrofit, OkHttp  
-- **Payments:** ISO 8583 over **raw TCP sockets**  
-- **Hardware:** EMV / contactless on **Topwise** and **Sunmi** device flavors  
-- **Integrations:** TMS (configuration), transaction logger API, DMS (discount), **JSch SFTP** for offline file upload  
-- **Quality:** Detekt, Spotless (ktlint), SonarQube wiring in Gradle  
-
----
-
-## Highlights
-
-- **32 Gradle build variants** from four flavor dimensions (client × device × host × environment).
-- **Dual acquirer host** support (Paysys / Euronet) with shared domain logic and host-specific source sets.
-- **Dual terminal platform** integration (Topwise vs Sunmi) behind shared interfaces.
-- **Full transaction lifecycle:** sale, void, settlement, reversal, MOTO, tip adjust, retail / billing flows.
-- **TMS-driven** feature flags, merchant/network settings, and app update policy.
-- **Transaction logger:** REST upload with **AES-encrypted line fallback** to local files, **SFTP** upload during settlement, **1000 records per part file** rollover.
-- **DMS (discount):** API update with **CSV fallback** and same SFTP pipeline as discount files.
-- **Operational resilience:** free-space guard before starting payment flows (internal data partition + app external files); dashboard dialog + SDK failure path.
-- **Embeddable SDK** mode (`SDK_BUILD` / `isSdkBuild` in Gradle) exposing pay, keyed-in pay, void, settle, print, configure, settings, logon, transaction history.
-- **Crash reporting** to encrypted external logs with **internal storage fallback** if external write fails.
-
----
-
-## Architecture
-
-**Pattern:** MVVM with `MutableStateFlow` / `StateFlow` for UI state; **Intent-based** navigation between Activities (no Jetpack Navigation graph).
-
-**Layers (conceptual):**
-
-```mermaid
-flowchart TB
-  subgraph ui [Presentation]
-    Screen[Compose Screens]
-    VM[ViewModels Hilt]
-  end
-  subgraph domain [Domain]
-    Sale[sale void settlement moto reversal]
-  end
-  subgraph data [Data and IO]
-    Room[Room DatabaseManager]
-    Retro[Retrofit OkHttp]
-    Socket[ISO8583 Socket]
-  end
-  subgraph platform [Flavors]
-    DevHW[topwise sunmi implementations]
-    DevHost[paysys euronet implementations]
-  end
-  Screen --> VM
-  VM --> Sale
-  Sale --> Room
-  Sale --> Retro
-  Sale --> Socket
-  Sale --> DevHW
-  Sale --> DevHost
-```
-
-**Typical sale UI flow:**
-
-```mermaid
-flowchart LR
-  D[DashboardActivity]
-  S[SaleEntryActivity]
-  C[SearchCardActivity]
-  P[PinEntryActivity optional]
-  X[ProcessScreenActivity]
-  OK[SuccessScreenActivity]
-  ERR[ErrorScreenActivity]
-  D --> S
-  S --> C
-  C --> P
-  P --> X
-  C --> X
-  X --> OK
-  X --> ERR
-```
-
-**Key directories** (in the full source repo):
-
-- `app/src/main/java/.../presentation/features/` — one folder per screen (dashboard, sale, void, process, success, DMS, settings, etc.).
-- `app/src/main/java/.../domain/transactions/` — sale, void, settlement, reversal, moto orchestration.
-- `app/src/main/java/.../services/` — database, navigation, TMS, file logging, ISO helpers.
-- `app/src/main/java/.../remote/network` — Retrofit APIs and repositories.
-- `app/src/main/java/.../remote/socket` — binary ISO 8583 over TCP.
-- `app/src/topwise/`, `app/src/sunmi/`, `app/src/paysys/`, `app/src/euronet/`, `app/src/uat/` — flavor-specific implementations.
-- `app/src/main/java/.../sdk/` — host-app SDK surface (`SdkManager`, `SdkManagerImp`, callbacks, response shaping).
-
----
-
-## Build variants (32 combinations)
-
-Defined in `app/build.gradle.kts` under `productFlavors` and `flavorDimensions`:
-
-- **Client:** `keenu`, `loop` — branding and client-specific resources.
-- **Device:** `topwise`, `sunmi` — card reader, printer, EMV integration.
-- **Host:** `paysys`, `euronet` — acquirer protocol and host-specific modules.
-- **Environment:** `prod`, `uat`, `qa`, `dev` — encrypted config URLs and environment labels in `BuildConfig`.
-
-**Example assemble task:** `:app:assembleLoopSunmiPaysysDevDebug`  
-Produces a debug APK under `app/build/outputs/apk/<variantFolder>/debug/` (output naming may include version and variant in the filename).
-
-**SDK vs app:** At the top of `app/build.gradle.kts`, `isSdkBuild` toggles between **standalone application** and **library-style SDK** packaging; `BuildConfig.SDK_BUILD` reflects the same for runtime branching.
-
----
-
-## Core flows (reference paths)
-
-Paths are relative to the **application module root** `app/`.
-
-### Sale
-
-- Orchestration: `src/main/java/.../domain/transactions/sale/ProcessSaleTransaction.kt`
-- Host response, receipt, logger handoff: `.../domain/transactions/sale/CompleteSaleTransaction.kt`
-- In-memory ISO and connection state: `.../domain/transactions/sale/handlers/TransactionHandler.kt`
-
-### Settlement
-
-- Batch selection, printing, SFTP for discount + logger fallbacks: `.../domain/transactions/settlement/helpers/SettlementHelper.kt`
-
-### Transaction logger and SFTP fallback
-
-- API send, timeout, fallback write: `.../remote/network/repositories/DataLoggerRepository.kt`
-- Encrypted fallback append, DMS CSV append, JSch upload, archive: `.../services/fileLoggingService/FileLoggingService.kt`
-- Constants (e.g. `MAX_RECORDS_PER_FILE = 1000`, folder names): `.../services/fileLoggingService/FileLoggingServiceConstants.kt`
-- Deep dive: `docs/TransactionLogging.md`
-
-### DMS (discount)
-
-- Update discount API and CSV fallback on error: `.../presentation/features/dms/service/DMSService.kt`
-
-### TMS and app updates
-
-- Flow documentation: `docs/TMS_APP_UPDATE_FLOW.md`
-- Runtime fetch / settings merge: `.../services/tmsService/TMSService.kt` (and related TMS presentation packages).
-
-### MOTO (keyed / mail order)
-
-- Product docs: `docs/MOTO_SALE_DOCUMENTATION.md`, `docs/moto_technical_summary.md`, `docs/moto_integration_guide.md`
-- Paysys field notes: `docs/PAYSYS_MOTO_SALE_FIELDS.md`
-
-### CDCVM / contactless
-
-- Analysis: `docs/cdcvm_analysis.md`
-
-### Crash handling
-
-- Encrypted crash file + internal fallback: `.../presentation/features/crashScreen/crashHandler/CrashHandler.kt`
-
-### Storage health (low disk guard)
-
-- StatFs on internal data dir and app external files: `.../utils/StorageHealth.kt`
-- Dashboard gate (dialog + retry, combined with printer check): `.../presentation/features/dashboard/viewModel/DashboardViewModel.kt`
-- SDK pay / keyed-in pay entry: `.../sdk/SdkManagerImp.kt`
-
----
-
-## Embeddable SDK
-
-**Interface:** `app/src/main/java/.../sdk/SdkManager.kt`
-
-**Implemented in:** `.../sdk/SdkManagerImp.kt`
-
-**Public operations (indicative):**
-
-- `suspend fun pay(activity, amount, callback)` — amount entry then card flow.
-- `suspend fun keyedInPay(activity, amount, callback)` — MOTO-style path.
-- `suspend fun void(activity, invoiceNumber, callback)`
-- `fun settle(activity, callback)`
-- `fun configure(activity, callback)`
-- `fun print(activity, callback)`
-- `fun settings(activity, callback)`
-- `suspend fun logon(activity, callback)`
-- `fun openTransactionHistory(activity, callback)`
-
-**Response shaping and field exclusion** for host apps: `.../sdk/helpers/SdkResponseFieldExclusionConfig.kt`  
-**Documentation:** `docs/SDK_RESPONSES_README.md`
-
----
-
-## Resilience, quality, and security (docs only)
-
-- **Obfuscation / R8:** `docs/OBFUSCATION_GUIDE.md`, `docs/OBFUSCATION_SUMMARY.md`
-- **Code quality:** `docs/code_quality.md`
-- **Performance logging:** `docs/PerformanceLogging.md`
-- **Tests:** `app/src/test/` (unit), `app/src/androidTest/` (instrumented)
-
-**Secrets:** Keys, passwords, and environment URLs belong in **local** `gradle.properties` or CI secrets — they are **not** listed in this README.
-
----
-
-## Build and run (no secrets)
-
-From the repository root:
-
-```bash
-# Example: Loop + Sunmi + Paysys + Dev + Debug
-./gradlew :app:assembleLoopSunmiPaysysDevDebug
-```
-
-Other variants follow the same pattern: `:app:assemble<Client><Device><Host><Env><Debug|Release>`.
-
-Optional quality tasks are wired in `app/build.gradle.kts` (Spotless, Detekt, Sonar properties).
-
----
-
-## Further reading (in-repo documentation)
-
-All paths below are under `docs/` in the **source** repository:
-
-- `docs/TransactionLogging.md` — logger API, payload, fallback files, SFTP settlement order.
-- `docs/TMS_APP_UPDATE_FLOW.md` — post-settlement update dialog and TMS behavior.
-- `docs/SDK_RESPONSES_README.md` — SDK JSON contracts for host apps.
-- `docs/MOTO_SALE_DOCUMENTATION.md`, `docs/moto_technical_summary.md`, `docs/moto_integration_guide.md`, `docs/PAYSYS_MOTO_SALE_FIELDS.md`
-- `docs/cdcvm_analysis.md`
-- `docs/PerformanceLogging.md`
-- `docs/OBFUSCATION_GUIDE.md`, `docs/OBFUSCATION_SUMMARY.md`
-- `docs/code_quality.md`
-- Hardware / driver notes for development machines: `docs/force_reinstall_pl2303_driver.md`, `docs/sunmi_windows_driver_troubleshooting.md`, `docs/sunmi_mediatek_driver_solution.md`
-
-**Project map (high level):** see `skill.md` in the source repo for directory layout and screen inventory.
+**Neutral glossary (this README only)**
+
+- **Acquirer A / Acquirer B** — Two white-label **client** product lines in Gradle (branding, resources). Not bank names.
+- **Host A / Host B** — Two **payment switch** implementations behind the same domain APIs (ISO 8583 field layout and socket behavior differ per host flavor).
+- **OEM stack A / OEM B** — Two **device** integrations (card reader, printer, EMV lifecycle).
+- **Environment** — Non-production vs production **config endpoints** (Gradle dimension); values are not listed here.
 
 ---
 
 ## GitHub
 
-This file is the default **`README.md`** on [github.com/shummasniazi/fintech](https://github.com/shummasniazi/fintech). Update the portfolio text there by editing this document in the private repo and pushing to `main`, or edit on GitHub directly.
+This file is the default **`README.md`** on [github.com/shummasniazi/fintech](https://github.com/shummasniazi/fintech). Edit in the private repo and push to `main`, or edit on GitHub.
 
-This README intentionally **does not** embed proprietary host URLs, keys, or merchant data.
+This README intentionally **does not** embed proprietary URLs, keys, merchant data, or real institution names.
+
+---
+
+## Tech stack (summary)
+
+Kotlin, Jetpack Compose, Hilt, Room, Retrofit, OkHttp, raw TCP **ISO 8583**, JSch SFTP, Detekt, Spotless, Sonar wiring.
+
+---
+
+## Part 1 — Product shape (no host or bank names)
+
+The app is built as **one application module** with Gradle **flavor dimensions** so one codebase ships:
+
+- **Two acquirer product lines** (Acquirer A / B)
+- **Two OEM terminal stacks** (OEM A / B)
+- **Two payment hosts** (Host A / B)
+- **Several environments** (dev / QA / UAT / prod style labels in Gradle)
+
+That yields many **assemble** task combinations; each variant selects the right **host field adapter** and **device service** implementations at compile time.
+
+---
+
+## Part 2 — End-to-end sale flow (user journey)
+
+High-level path from idle terminal to receipt:
+
+```mermaid
+flowchart TD
+  subgraph preDash [Dashboard and entry]
+    D[Dashboard]
+    S[Sale amount entry]
+  end
+  subgraph card [Card and EMV]
+    C[Search card]
+    P[PIN if required]
+  end
+  subgraph online [Host]
+    X[Process screen send]
+    H[Host authorization]
+  end
+  subgraph finish [Complete and print]
+    U[Update DB host fields]
+    L[Async transaction log API]
+    R[Print receipts]
+    OK[Success UI]
+  end
+  D --> S
+  S --> C
+  C --> P
+  P --> X
+  C --> X
+  X --> H
+  H --> U
+  U --> L
+  L --> R
+  R --> OK
+```
+
+---
+
+## Part 3 — Checks before the operator presses **Sale**
+
+These run **before** navigation to the amount / card flow (order is conceptually: debounce, print busy, retail USB, storage, printer paper, then business rules like forced settlement).
+
+```mermaid
+flowchart TD
+  Tap[Operator taps Sale or Punch order]
+  Debounce[Debounce rapid taps]
+  PrintBusy{Another print in progress}
+  Retail{Retail mode and USB disconnected}
+  Storage{Free space below threshold}
+  Paper{Printer paper out}
+  Settle{Forced settlement required}
+  Allow[Proceed to sale entry or retail amount]
+  Tap --> Debounce
+  Debounce --> PrintBusy
+  PrintBusy -->|yes| Block1[Block]
+  PrintBusy -->|no| Retail
+  Retail -->|blocked path| Block2[Block]
+  Retail -->|ok| Storage
+  Storage -->|low| DialogStorage[Alert Retry after cleanup]
+  Storage -->|ok| Paper
+  Paper -->|out| DialogPaper[Alert Retry after load paper]
+  Paper -->|ok| Settle
+  Settle -->|yes| ToastSettle[Block with settle message]
+  Settle -->|no| Allow
+```
+
+**What each gate does (conceptually)**
+
+- **Print in progress** — Global print status prevents overlapping receipt jobs.
+- **Retail** — If integrated retail mode expects a USB peripheral, connectivity is checked before continuing.
+- **Storage** — Before actions that share the same gate as printing, the app requires **minimum free space** on the internal data partition and on app-scoped external files (so Room writes and log fallbacks are less likely to fail). Implemented in `.../utils/StorageHealth.kt` and invoked from `.../presentation/features/dashboard/viewModel/DashboardViewModel.kt`.
+- **Printer paper** — Paper-out sensor path; **Retry** re-checks before continuing (`ReceiptPrintManager` from the dashboard VM).
+- **Forced settlement** — Business policy can block new sales until batch settlement (same VM layer as sale click).
+
+**Code anchors (private tree)**
+
+- Dashboard click wiring: `.../presentation/features/dashboard/view/DashboardScreen.kt`
+- Debounce, settlement, storage + printer orchestration: `.../presentation/features/dashboard/viewModel/DashboardViewModel.kt`
+
+---
+
+## Part 4 — After amount and card: building the **domain packet** (not wire yet)
+
+When the card flow finishes, `ProcessSaleTransaction.initialize` runs in the sale pipeline:
+
+1. **Allocate** next invoice and STAN from the database helper.
+2. **`generateSalePacket`** — Validates EMV / card state from `TransactionHandler`, then builds a `BaseTransactionModel` via `SaleModelCreation` (PAN, amount, dates, entry mode, ICC, track2, PIN block if present, merchant/terminal IDs, NII, private fields, discount and billing-related fields, etc.).
+3. **`Validator.validate(saleModel)`** — Internal consistency checks; on failure the flow stops with a terminal-side error path.
+4. **`finalIsoPacket`** — See Part 5.
+
+**Code anchors**
+
+- Orchestration: `.../domain/transactions/sale/ProcessSaleTransaction.kt`
+- Model factory: `.../domain/transactions/sale/utils/SaleModelCreation.kt`
+- In-flight card and amount state: `.../domain/transactions/sale/handlers/TransactionHandler.kt`
+
+---
+
+## Part 5 — Which **ISO 8583 fields** go into the wire message (and how Host A/B matters)
+
+`SaleISOFieldsBuilder.getSaleIsoFields` turns the `BaseTransactionModel` into an ordered list of `ISOFieldModel` entries. **Common bits** include MTI, PAN, processing code, amount (12-digit), STAN, local time/date, expiry, country code, POS entry mode, optional PAN sequence, NII/function code, **POS condition** (differs for normal vs MOTO sale via `SaleType`), terminal ID, merchant ID, merchant name, private field 48, currency, optional PIN (52), optional security-related field 53, optional ICC (55), field 60, invoice (62), reserved private (120), and optional tip / batch extension fields (121–122) when tip is non-zero.
+
+**Host-specific shaping** — Many positions call `saleFieldsInterface` (implemented in the **Host A / Host B** source sets): examples include local date/time presentation, country code, NII, track 2, merchant name, field 48/49/53/60/120, tip and batch-related fields. That is how the **same** `BaseTransactionModel` produces **different** on-wire layouts without forking the whole sale orchestrator.
+
+**Code anchors**
+
+- Field list and conditionals: `.../domain/transactions/sale/utils/SaleISOFieldsBuilder.kt`
+- Host-facing interface: `.../flavors/interfaces/` (implementations live under host-specific source roots bundled by Gradle)
+
+```mermaid
+flowchart LR
+  M[BaseTransactionModel]
+  B[SaleISOFieldsBuilder]
+  I[saleFieldsInterface Host A or B]
+  L[List of ISOFieldModel]
+  M --> B
+  B --> I
+  I --> L
+```
+
+---
+
+## Part 6 — How the **binary ISO packet** is produced
+
+1. **`ISO8583PacketBuilder.buildPacket`** walks each `ISOFieldModel`. Non-empty fields with positive length are written into an `ISO8583Message` bit map using per-field length and optional hex/binary conversion flags.
+2. **`getPacketHeader`** prepends a **length prefix** and **TPDU** header bytes to the ISO body so the raw socket layer sends a single framed message.
+
+**Code anchors**
+
+- `.../services/iso8583/packetBuilder/ISO8583PacketBuilder.kt`
+- `.../services/iso8583/packetBuilder/ISO8583Message.kt`
+
+```mermaid
+flowchart LR
+  L[ISOFieldModel list]
+  Msg[ISO8583Message setBit per field]
+  Bytes[ISO body bytes]
+  H[TPDU plus length prefix]
+  Out[Final ByteArray for socket]
+  L --> Msg --> Bytes --> H --> Out
+```
+
+---
+
+## Part 7 — **Persisting** the sale in Room **before** the host responds
+
+After `finalIsoPacket()`:
+
+- `insertTransactionLogWithReadyToSendStatus` maps the model to a `TransactionLogEntity`, adds logger columns (`if_transaction_guid`, `if_transaction_logged`, etc.), and **`insertAndGetId`** into the `TRANSACTION_LOG` table.
+- Status is **ReadyToSend**; the serialized ISO bytes live in the row for audit and retransmit patterns.
+- On success the UI navigates to the **process** screen, which drives the socket send and host wait.
+
+```mermaid
+sequenceDiagram
+  participant PS as ProcessSaleTransaction
+  participant DB as Room DatabaseManager
+  participant UI as ProcessScreenActivity
+  PS->>PS: finalIsoPacket
+  PS->>DB: insertAndGetId TRANSACTION_LOG
+  DB-->>PS: transaction id
+  PS->>UI: navigate ProcessScreen
+```
+
+**Code anchors**
+
+- Insert and status: `.../domain/transactions/sale/ProcessSaleTransaction.kt` (`insertTransactionLogWithReadyToSendStatus`, `initialize`)
+
+---
+
+## Part 8 — **Online** phase: send, update status, interpret host reply
+
+After insert, the process screen sends the byte array over TCP, then:
+
+- Updates **SentToHost** and persists STAN-related fields via callbacks registered in `setupAfterSendCallback`.
+- Parses the host response into a `SocketResponse` (RRN, auth code, response code, host date/time, optional ICC payload).
+- **Success path** (response code rules include an optional certification mode for EMV testing): updates model to **HostSuccess**, hands off to completion.
+- **Failure path** — Reversal / error UI depending on policy.
+
+**Code anchors**
+
+- `.../domain/transactions/sale/ProcessSaleTransaction.kt` (`handleSaleSuccess`, `afterSendMethodSale`)
+- `.../remote/socket/` (socket client and response parsing)
+
+---
+
+## Part 9 — **Completing** the sale: DB merge, logging, **printing**
+
+`CompleteSaleTransaction` coordinates post-host work:
+
+- **Persist host fields** — Updates the same `TRANSACTION_LOG` row with response time/date, DE39, RRN, auth code, EMV TVR/TSI if updated, QR/barcode value, billing columns when enabled, etc.
+- **Transaction logger** — Asynchronous REST call with timeout; on failure the app appends an **encrypted JSON line** to a local fallback file (rolled by record count), uploaded later over SFTP during settlement. See `.../remote/network/repositories/DataLoggerRepository.kt` and `.../services/fileLoggingService/FileLoggingService.kt` and internal doc `docs/TransactionLogging.md` in the private repo.
+- **Printing** — Merchant/customer receipt generation through the print stack for the active **OEM** integration; print state transitions (e.g. in progress / success) are written back to the transaction row.
+
+```mermaid
+flowchart TD
+  HS[HostSuccess]
+  DBU[Update row host and EMV fields]
+  LOG[Send transaction log API or fallback file]
+  PR[Print merchant then customer if configured]
+  SU[Success screen]
+  HS --> DBU
+  DBU --> LOG
+  LOG --> PR
+  PR --> SU
+```
+
+**Code anchors**
+
+- `.../domain/transactions/sale/CompleteSaleTransaction.kt`
+- Printing managers under `.../printing/` and OEM-specific implementations under OEM-flavored source sets
+
+---
+
+## Part 10 — **DMS**, **settlement SFTP**, **crash**, **SDK** (short pointers)
+
+- **Discount / DMS** — Update API; on failure a **CSV line** is appended under app external files for later SFTP (`.../presentation/features/dms/service/DMSService.kt` plus file service above).
+- **Settlement** — Batch close and reporting; also triggers ordered **SFTP upload** of pending discount and logger fallback files before follow-up UI (`.../domain/transactions/settlement/helpers/SettlementHelper.kt`).
+- **Crash** — Encrypted external log with internal-storage fallback (`.../presentation/features/crashScreen/crashHandler/CrashHandler.kt`).
+- **Embeddable SDK** — Same activities invoked from a host app: pay, keyed pay, void, settle, print, configure, settings, logon, history (`.../sdk/SdkManager.kt`, `.../sdk/SdkManagerImp.kt`). Low-storage guard applies on SDK entry paths as well.
+
+---
+
+## Part 11 — Build and quality (commands only)
+
+```bash
+./gradlew :app:assemble<Acquirer><OEM><Host><Env>Debug
+```
+
+APKs appear under `app/build/outputs/apk/<variant>/debug/` with a generated filename pattern from Gradle.
+
+Quality tooling: Spotless, Detekt, Sonar properties in `app/build.gradle.kts`.
+
+---
+
+## Part 12 — Further reading (files exist only in the private repo)
+
+- Transaction logging and SFTP: `docs/TransactionLogging.md`
+- TMS / app update: `docs/TMS_APP_UPDATE_FLOW.md`
+- MOTO: `docs/MOTO_SALE_DOCUMENTATION.md` and related MOTO docs
+- SDK JSON: `docs/SDK_RESPONSES_README.md`
+- Obfuscation: `docs/OBFUSCATION_GUIDE.md`, `docs/OBFUSCATION_SUMMARY.md`
+- Code quality: `docs/code_quality.md`
+- High-level map: `skill.md`
+
+---
+
+## Closing
+
+This README is a **structured portfolio narrative** focused on **sale flow**, **preconditions**, **ISO construction**, **persistence**, and **completion**. For exact field matrices per host, see the private repository’s host-specific `SaleFields` implementations and internal integration documents.
