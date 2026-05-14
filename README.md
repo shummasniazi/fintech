@@ -1,6 +1,6 @@
 # Loop NextGen POS — Android Payment Terminal Application
 
-**Portfolio / work showcase.** This document describes a production-style **Kotlin Android POS** application for payment terminals. It is written so you can copy it into a public repo (for example [shummasniazi/fintech](https://github.com/shummasniazi/fintech)) **without publishing source code**. File paths below refer to the **private source tree** where the project lives; they are not present in an empty showcase repo.
+**Portfolio / work showcase.** This document describes a production-style **Kotlin Android POS** application for payment terminals. The same content is published as **`README.md`** in [shummasniazi/fintech](https://github.com/shummasniazi/fintech) (GitHub) **without publishing application source code**. File paths below refer to the **private source tree** where the project lives; they are not present in that public repo.
 
 **Author:** [shummasniazi](https://github.com/shummasniazi)
 
@@ -234,10 +234,8 @@ All paths below are under `docs/` in the **source** repository:
 
 ---
 
-## Using this file on GitHub
+## GitHub copy
 
-1. Open [fintech](https://github.com/shummasniazi/fintech) (or any empty showcase repo).  
-2. Add **`README.md`** via the GitHub UI and paste the contents of this file (GitHub’s default is `README.md`; renaming from `readme.md` is optional).  
-3. Optionally add a one-line **Disclaimer** in the GitHub repo description: *Portfolio narrative — source code private.*
+The [fintech](https://github.com/shummasniazi/fintech) repository on GitHub uses this document as **`README.md`** (sync by copying from this file when you update the portfolio text).
 
 This README intentionally **does not** embed proprietary host URLs, keys, or merchant data.
