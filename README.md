@@ -1,6 +1,6 @@
-# Loop NextGen POS — Android Payment Terminal Application
+# NextGen POS — Android Payment Terminal Application
 
-**Portfolio / work showcase.** This document describes **Loop NextGen POS** — a production-style Kotlin Android payment terminal application. **Application source is not in this public repository**; paths below use `...` within `app/src/main/java/...` to avoid tying the narrative to internal product or host codenames.
+**Portfolio / work showcase.** This document describes **NextGen POS** — a production-style Kotlin Android payment terminal application. **Application source is not in this public repository**; paths below use `...` within `app/src/main/java/...` to avoid tying the narrative to internal product or host codenames.
 
 **Author:** [shummasniazi](https://github.com/shummasniazi)
 
