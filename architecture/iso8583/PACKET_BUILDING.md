@@ -84,7 +84,7 @@ Default MTI in constants is **`0200`** for sale request (aligned with **`SaleISO
 9. If secured control data non-empty: flavor wrapper for **DE53**.
 10. If ICC bytes exist: same **hex + byte length + custom conversion** pattern for **DE55**.
 11. **DE60** (flavor), **DE62** invoice, **DE120** (flavor).
-12. If tip amount &gt; 0: **DE121** and **DE122** via flavor helpers.
+12. If tip amount > 0: **DE121** and **DE122** via flavor helpers.
 
 Each appended model is logged when valid.
 
@@ -249,7 +249,7 @@ Unpacks a previously set field for debugging or reply handling (symmetric to **`
 | **60** | Reserved private (flavor). |
 | **62** | Invoice / private reference. |
 | **120** | Network private (flavor). |
-| **121–122** | Tip amount and batch-related value when tip &gt; 0 (flavor). |
+| **121–122** | Tip amount and batch-related value when tip > 0 (flavor). |
 
 Exact presence and host-specific layout are always governed by the live **`SaleISOFieldsBuilder`** + **`SaleFieldsInterface`** for your flavor.
 
